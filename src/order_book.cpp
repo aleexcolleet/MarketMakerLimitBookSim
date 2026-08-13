@@ -5,6 +5,7 @@
 #include <map>
 #include <unordered_map>
 #include <utility>
+#include <algorithm>
 
 namespace mms {
     namespace {
@@ -36,10 +37,10 @@ namespace mms {
         }
 
         template <typename SideMap>
-        void rest_order(SideMap& m, const Order& o) {
+        void rest_order(SideMap& m, const Order& o, Quantity qty) {
             PriceLevel& lvl = m[o.price];
-            lvl.queue.push_back(RestingOrder{o.id, o.quantity, o.timestamp, o.owner});
-            lvl.total += o.quantity;
+            lvl.queue.push_back(RestingOrder{o.id, qty, o.timestamp, o.owner});
+            lvl.total += qty;
         }
 
         template <typename SideMap>
@@ -82,6 +83,13 @@ namespace mms {
             return out;
         }
 
+        bool is_marketable(const Order& incoming, Price resting_price) {
+            if (incoming.type == OrderType::Market) return true;
+            return incoming.side == Side::Buy ? incoming.price >= resting_price
+                                            : incoming.price <= resting_price;
+        }
+
+
     }// anonymous namespace
 
     //Block 3
@@ -91,6 +99,9 @@ namespace mms {
         std::unordered_map<OrderId, Locator> index;
         std::size_t live_orders = 0;
         TradeCallback on_trade;
+
+        template <typename SideMap>
+        Quantity match(SideMap& opposite, const Order& incoming, Quantity& remaining);
     };
 
 
@@ -193,6 +204,20 @@ namespace mms {
             t.ask_size = l.total;
         }
         return t;
+    }
+
+    template <typename SideMap>
+    Quantity OrderBook::Impl::match(SideMap& opposite, const Order& incoming, Quantity& remaining) {
+        Quantity executed = 0;
+
+        while (remaining > 0 && !opposite.empty()) {
+            const auto level_it = opposite.begin();
+            const Price level_price = level_it->first;
+
+            if (!is_marketable(incoming, level_price)) break;
+
+            PriceLevel& lvl = level_it->second;
+        }
     }
 
 }// namespace mms
