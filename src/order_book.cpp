@@ -5,6 +5,7 @@
 #include <map>
 #include <unordered_map>
 #include <utility>
+#include <algorithm>
 
 namespace mms {
     namespace {
@@ -36,10 +37,10 @@ namespace mms {
         }
 
         template <typename SideMap>
-        void rest_order(SideMap& m, const Order& o) {
+        void rest_order(SideMap& m, const Order& o, Quantity qty) {
             PriceLevel& lvl = m[o.price];
-            lvl.queue.push_back(RestingOrder{o.id, o.quantity, o.timestamp, o.owner});
-            lvl.total += o.quantity;
+            lvl.queue.push_back(RestingOrder{o.id, qty, o.timestamp, o.owner});
+            lvl.total += qty;
         }
 
         template <typename SideMap>
@@ -82,6 +83,13 @@ namespace mms {
             return out;
         }
 
+        bool is_marketable(const Order& incoming, Price resting_price) {
+            if (incoming.type == OrderType::Market) return true;
+            return incoming.side == Side::Buy ? incoming.price >= resting_price
+                                            : incoming.price <= resting_price;
+        }
+
+
     }// anonymous namespace
 
     //Block 3
@@ -91,6 +99,9 @@ namespace mms {
         std::unordered_map<OrderId, Locator> index;
         std::size_t live_orders = 0;
         TradeCallback on_trade;
+
+        template <typename SideMap>
+        Quantity match(SideMap& opposite, const Order& incoming, Quantity& remaining);
     };
 
 
@@ -133,16 +144,26 @@ namespace mms {
 
     //Block B
     Quantity OrderBook::submit(const Order& order) {
-        if (order.type != OrderType::Limit) return 0;   // TODO 3.4: market and IOC
         if (order.quantity <= 0) return 0;
         if (contains(order.id)) return 0;
 
-        if (order.side == Side::Buy) rest_order(impl_->bids, order);
-        else rest_order(impl_->asks, order);
+        Quantity remaining = order.quantity;
 
-        impl_->index[order.id] = Locator{order.side, order.price};
-        ++impl_->live_orders;
-        return 0;                                       // TODO 3.3: executed quantity
+        // A buy crosses against the asks; a sell crosses against the bids.
+        const Quantity executed = (order.side == Side::Buy)
+            ? impl_->match(impl_->asks, order, remaining)
+            : impl_->match(impl_->bids, order, remaining);
+
+        // Only limit orders rest. Market and IOC discard the remainder.
+        if (remaining > 0 && order.type == OrderType::Limit) {
+            if (order.side == Side::Buy) rest_order(impl_->bids, order, remaining);
+            else                         rest_order(impl_->asks, order, remaining);
+
+            impl_->index[order.id] = Locator{order.side, order.price};
+            ++impl_->live_orders;
+        }
+
+        return executed;
     }
 
     //Block C
@@ -193,6 +214,57 @@ namespace mms {
             t.ask_size = l.total;
         }
         return t;
+    }
+
+    template <typename SideMap>
+    Quantity OrderBook::Impl::match(SideMap& opposite, const Order& incoming, Quantity& remaining) {
+        Quantity executed = 0;
+
+        while (remaining > 0 && !opposite.empty()) {
+            const auto level_it = opposite.begin();
+            const Price level_price = level_it->first;
+
+            if (!is_marketable(incoming, level_price)) break;
+
+            PriceLevel& lvl = level_it->second;
+
+            while (remaining > 0 && !lvl.queue.empty()) {
+                RestingOrder& resting = lvl.queue.front();
+                const Quantity traded = std::min(remaining, resting.remaining);
+
+                // Build the trade BEFORE mutating: `resting` dangles after pop_front().
+                Trade t;
+                t.price           = level_price;   // executes at the RESTING price
+                t.quantity        = traded;
+                t.aggressor_id    = incoming.id;
+                t.resting_id      = resting.id;
+                t.aggressor_side  = incoming.side;
+                t.timestamp       = incoming.timestamp;
+                t.aggressor_owner = incoming.owner;
+                t.resting_owner   = resting.owner;
+
+                resting.remaining -= traded;
+                lvl.total         -= traded;
+                remaining         -= traded;
+                executed          += traded;
+
+                if (resting.remaining == 0) {
+                    index.erase(resting.id);
+                    --live_orders;
+                    lvl.queue.pop_front();
+                }
+                // A partial fill keeps its queue position by construction: we
+                // decrement and do not pop.
+
+                if (on_trade) on_trade(t);
+            }
+
+            // Erase the level only after we have finished with it — `lvl` is a
+            // reference into the map and erasing invalidates it.
+            if (lvl.queue.empty()) opposite.erase(level_it);
+        }
+
+        return executed;
     }
 
 }// namespace mms
