@@ -577,12 +577,5 @@ int main() {
     book_never_crosses_itself();
     quantity_is_conserved();
 
-    if (failures.empty()) {
-        std::printf("%d checks passed\n", checks_run);
-        return check_harness::report();;
-    }
-
-    std::printf("%zu of %d checks FAILED\n", failures.size(), checks_run);
-    for (const auto& f : failures) std::printf("  %s\n", f.c_str());
-    return 1;
+    return check_harness::report();
 }
