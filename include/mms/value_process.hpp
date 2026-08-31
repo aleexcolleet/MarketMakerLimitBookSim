@@ -9,8 +9,8 @@ namespace mms {
 
 struct ValueParams {
     double initial          = 10000.0;  // ticks
-    double volatility       = 0.30;     // s.d. of the diffusive increment, in ticks
-    double jump_probability = 0.002;    // per event, chance of a repricing
+    double volatility       = 0.30;     // s.d. of the increment over one unit of time, in ticks
+    double jump_intensity   = 0.002;    // expected jumps per unit of time
     double jump_size        = 15.0;     // s.d. of that repricing, in ticks
 };
 
@@ -34,12 +34,29 @@ public:
     ValueProcess(const ValueParams& params, Rng& rng) noexcept
         : params_(params), rng_(&rng), value_(params.initial) {}
 
-    void step() noexcept {
-        value_ += params_.volatility * rng_->normal();
-        if (rng_->bernoulli(params_.jump_probability)) {
+    // Advance the value by an elapsed interval.
+    //
+    // sqrt(dt), not dt. The increments of a random walk are independent, so
+    // *variances* add: over an interval dt the variance is vol^2 * dt and the
+    // standard deviation is vol * sqrt(dt). This is the most common error in a
+    // simulation driven by an irregular clock, and it is invisible — the paths
+    // still look plausible, they just have the wrong volatility term structure.
+    // It is the same reason annualised vol is daily vol times sqrt(252).
+    //
+    // Jumps arrive as a Poisson process with intensity `jump_intensity`, so the
+    // probability of at least one arrival in dt is 1 - exp(-intensity*dt).
+    // expm1(x) computes exp(x) - 1 accurately for small x, where computing it
+    // directly loses almost every significant digit to cancellation: at
+    // x = 1e-8, exp(x) is 1.00000001 and subtracting 1 from a 16-digit double
+    // leaves you with about eight. expm1 and log1p exist for exactly this.
+    void step(double dt) noexcept {
+        value_ += params_.volatility * std::sqrt(dt) * rng_->normal();
+        if (rng_->bernoulli(-std::expm1(-params_.jump_intensity * dt))) {
             value_ += params_.jump_size * rng_->normal();
         }
     }
+
+    void step() noexcept { step(1.0); }
 
     double value() const noexcept { return value_; }
 

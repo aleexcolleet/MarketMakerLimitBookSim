@@ -266,7 +266,7 @@ void a_still_value_does_not_move() {
     Rng r(kSeed);
     ValueParams p;
     p.volatility = 0.0;
-    p.jump_probability = 0.0;
+    p.jump_intensity = 0.0;
     ValueProcess v(p, r);
     for (int i = 0; i < 10000; ++i) v.step();
     CHECK(v.value() == p.initial);
@@ -300,7 +300,7 @@ void the_value_is_a_martingale() {
     // P&L number the simulator ever produces.
     ValueParams p;
     p.volatility = 0.5;
-    p.jump_probability = 0.01;
+    p.jump_intensity = 0.01;
     p.jump_size = 20.0;
 
     constexpr int paths = 4000, steps = 500;
@@ -325,7 +325,7 @@ void the_variance_grows_linearly_in_time() {
     // the project depends on.
     ValueParams p;
     p.volatility = 0.5;
-    p.jump_probability = 0.0;
+    p.jump_intensity = 0.0;
 
     constexpr int paths = 4000;
     auto variance_after = [&](int steps) {
@@ -357,10 +357,10 @@ void jumps_fatten_the_tails() {
     // flatters a quoting strategy from one that tests it.
     ValueParams calm;
     calm.volatility = 0.5;
-    calm.jump_probability = 0.0;
+    calm.jump_intensity = 0.0;
 
     ValueParams jumpy = calm;
-    jumpy.jump_probability = 0.01;
+    jumpy.jump_intensity = 0.01;
     jumpy.jump_size = 20.0;
 
     constexpr int paths = 4000, steps = 200;
