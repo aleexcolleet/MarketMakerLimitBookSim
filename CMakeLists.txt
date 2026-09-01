@@ -33,7 +33,8 @@ endif()
 add_library(mms
         src/order_book.cpp
         src/flow.cpp
-        src/market_maker.cpp)
+        src/market_maker.cpp
+        src/attribution.cpp)
 target_include_directories(mms PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 # ---------------------------------------------------------------------------
@@ -59,3 +60,7 @@ add_test(NAME flow COMMAND mms_flow_tests)
 add_executable(mms_maker_tests tests/test_market_maker.cpp)
 target_link_libraries(mms_maker_tests PRIVATE mms)
 add_test(NAME market_maker COMMAND mms_maker_tests)
+
+add_executable(mms_attribution_tests tests/test_attribution.cpp)
+target_link_libraries(mms_attribution_tests PRIVATE mms)
+add_test(NAME attribution COMMAND mms_attribution_tests)
