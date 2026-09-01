@@ -6,6 +6,7 @@
 // that passes for the wrong reason.
 
 #include "mms/order_book.hpp"
+#include "check.hpp"
 
 #include <cstdio>
 #include <string>
@@ -20,18 +21,6 @@ using namespace mms;
 // ---------------------------------------------------------------------------
 
 namespace {
-
-int checks_run = 0;
-std::vector<std::string> failures;
-
-void check(bool ok, const char* expr, const char* file, int line) {
-    ++checks_run;
-    if (!ok) {
-        failures.push_back(std::string(file) + ":" + std::to_string(line) + "  " + expr);
-    }
-}
-
-#define CHECK(expr) check(static_cast<bool>(expr), #expr, __FILE__, __LINE__)
 
 // Builds a limit order. Keeps the tests reading like order flow.
 Order limit_order(OrderId id, Side side, Price price, Quantity qty, Timestamp ts = 0) {
@@ -63,10 +52,11 @@ struct Tape {
     std::vector<Trade> trades;
 
     void attach(OrderBook& b) {
-        b.set_trade_callback([this](const Trade& t) { trades.push_back(t); });
+        b.add_trade_listener([this](const Trade& t) { trades.push_back(t); });
     }
     std::size_t count() const { return trades.size(); }
     const Trade& operator[](std::size_t i) const { return trades.at(i); }
+
     Quantity total_quantity() const {
         Quantity q = 0;
         for (const auto& t : trades) q += t.quantity;
@@ -588,12 +578,5 @@ int main() {
     book_never_crosses_itself();
     quantity_is_conserved();
 
-    if (failures.empty()) {
-        std::printf("%d checks passed\n", checks_run);
-        return 0;
-    }
-
-    std::printf("%zu of %d checks FAILED\n", failures.size(), checks_run);
-    for (const auto& f : failures) std::printf("  %s\n", f.c_str());
-    return 1;
+    return check_harness::report();
 }

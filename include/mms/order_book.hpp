@@ -21,8 +21,11 @@ namespace mms {
         OrderBook(OrderBook&&) noexcept;
         OrderBook& operator=(OrderBook&&) noexcept;
 
-        //callback sink
-        void set_trade_callback(TradeCallback cb);
+        // Trade listeners, called in registration order after each trade.
+        // A vector rather than a single callback because there are now two
+        // subscribers — the flow generator and the market maker. No listener
+        // may assume anything about the others.
+        void add_trade_listener(TradeCallback cb);
 
         //Order Entry
         Quantity submit(const Order& order);

@@ -98,7 +98,7 @@ namespace mms {
         std::map<Price, PriceLevel, std::less<Price>>    asks;
         std::unordered_map<OrderId, Locator> index;
         std::size_t live_orders = 0;
-        TradeCallback on_trade;
+        std::vector<TradeCallback> listeners;
 
         template <typename SideMap>
         Quantity match(SideMap& opposite, const Order& incoming, Quantity& remaining);
@@ -123,8 +123,8 @@ namespace mms {
     }
 
     //Block 5
-    void OrderBook::set_trade_callback(TradeCallback cb) {
-        impl_->on_trade = std::move(cb);
+    void OrderBook::add_trade_listener(TradeCallback cb) {
+        impl_->listeners.push_back(std::move(cb));
     }
 
     void OrderBook::clear() {
@@ -256,7 +256,7 @@ namespace mms {
                 // A partial fill keeps its queue position by construction: we
                 // decrement and do not pop.
 
-                if (on_trade) on_trade(t);
+                for (const auto& l : listeners) l(t);
             }
 
             // Erase the level only after we have finished with it — `lvl` is a

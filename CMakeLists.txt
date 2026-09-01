@@ -30,7 +30,10 @@ endif()
 # ---------------------------------------------------------------------------
 #  Core library
 # ---------------------------------------------------------------------------
-add_library(mms src/order_book.cpp)
+add_library(mms
+        src/order_book.cpp
+        src/flow.cpp
+        src/market_maker.cpp)
 target_include_directories(mms PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 # ---------------------------------------------------------------------------
@@ -38,7 +41,21 @@ target_include_directories(mms PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 # ---------------------------------------------------------------------------
 enable_testing()
 
+# One binary per test file: each needs its own main(). Linking `mms` propagates
+# its PUBLIC include directory, which is how the test sources find <mms/...>.
+# check.hpp is found by quoted include, relative to the including file.
 add_executable(mms_tests tests/test_order_book.cpp)
 target_link_libraries(mms_tests PRIVATE mms)
-
 add_test(NAME order_book COMMAND mms_tests)
+
+add_executable(mms_sim_tests tests/test_random.cpp)
+target_link_libraries(mms_sim_tests PRIVATE mms)
+add_test(NAME simulation COMMAND mms_sim_tests)
+
+add_executable(mms_flow_tests tests/test_flow.cpp)
+target_link_libraries(mms_flow_tests PRIVATE mms)
+add_test(NAME flow COMMAND mms_flow_tests)
+
+add_executable(mms_maker_tests tests/test_market_maker.cpp)
+target_link_libraries(mms_maker_tests PRIVATE mms)
+add_test(NAME market_maker COMMAND mms_maker_tests)
