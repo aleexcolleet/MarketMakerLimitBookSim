@@ -277,10 +277,204 @@ members lazily.
 
 ---
 
+## D12 — Own distributions rather than `<random>`'s
+
+The *engines* in `<random>` are specified bit-for-bit by the standard; the *distributions* are
+not, and libstdc++ and libc++ genuinely consume a different number of engine outputs per variate.
+Cross-machine reproducibility is load-bearing here, so the distributions are implemented in the
+repository and specified by their source. *Rejected:* `<random>`'s distributions, on familiarity.
+*Cost:* a few dozen lines to write and test. *Verified:* identical output to four decimal places
+under GCC/libstdc++/Linux and AppleClang/libc++/macOS.
+
+---
+
+## D13 — splitmix64 as the engine
+
+Four lines, full 2⁶⁴ period from every seed, single-integer state, passes the standard test
+batteries. *Rejected:* `std::mt19937_64` — 2.5 KB of state, slow recovery from poor seeds, nothing
+to snapshot cheaply. *Deferred:* xoshiro256++, if the generator ever appears in a profile.
+
+---
+
+## D14 — Box–Muller discards its second variate
+
+Every call then consumes exactly two draws, so the generator state stays a single `uint64_t` and a
+simulation can be snapshotted, resumed or forked by copying one number. *Cost:* one extra `sqrt`
+and `log` per variate, which is nothing beside the order book work each event triggers.
+
+---
+
+## D15 — The latent value is a `double`, not a `Price`
+
+Prices are integers because equality decides matching and rounding accumulates into P&L (D1); the
+latent value is compared for neither and enters neither. Rounding it every step would also make
+sub-tick volatility vanish, so the volatility parameter would stop meaning what it says. Rounded
+with `llround` at the point of use, not cast — truncation is a half-tick bias that flips sign with
+the value.
+
+---
+
+## D16 — Jumps in the value process, not pure diffusion
+
+Pure diffusion gives the market maker a smooth loss that widening the spread solves. Real adverse
+selection is episodic: stale quotes get run over on one side. The tail test measures the
+difference — largest single event move 2.58 ticks without jumps, 75.28 with them, at the same
+volatility parameter.
+
+---
+
+## D17 — One superposed Poisson clock rather than one per stream
+
+Independent Poisson processes superpose; each event is of type *i* with probability λᵢ/Σλ,
+independently of timing. Two draws per event instead of four, identical distribution.
+
+---
+
+## D18 — Cancellation intensity is per-order, not per-market (closes D3)
+
+A constant cancellation rate has no equilibrium against a constant arrival rate: the book grew to
+11,766 resting orders after 200,000 events and price discovery failed by 140 ticks, while every
+other statistic looked healthy. δ·N gives a fixed point where posting = δ·N + fills, and is
+self-correcting. Steady state is now ~35 resting orders and the mid tracks the latent value to
+3.8 ticks. Same argument as birth–death processes: `M/M/1` is stable only when λ < μ, `M/M/∞`
+always.
+
+---
+
+## D19 — Background liquidity quotes relative to the opposite touch
+
+Guarantees background orders are never marketable, so all aggression in the simulation is chosen
+rather than accidental. Standard zero-intelligence formulation (Farmer, Patelli & Zovko). Falls
+back to the last traded price when that side is empty.
+
+---
+
+## D20 — Informed participants use IOC at perceived fair value, above an edge threshold
+
+A market order would sweep the book at any price; an informed participant takes what is mispriced
+and stops. A zero threshold would make them noise traders with extra steps and the market maker
+unprofitable at every spread.
+
+---
+
+## D21 — `ValueProcess::step` takes an elapsed interval
+
+Volatility scales with √dt because variances add over independent increments. Jump probability
+over dt is `-expm1(-λ·dt)` — exact, and numerically stable where `exp(x)-1` is not. Supersedes the
+unit-step version.
+
+---
+
+## D22 — `FlowGenerator` is neither pimpl'd nor header-only
+
+It installs a `this`-capturing callback, so it is non-copyable and non-movable by `= delete`. Not
+a public API, so no compilation firewall is needed; not hot enough to need cross-TU inlining.
+Three components, three different answers — the pattern follows from the problem.
+
+---
+
+## D23 — `OrderBook` publishes to a list of listeners
+
+Three subscribers now exist: the flow generator, the market maker, the attribution. Called in
+registration order; no listener may depend on another. Deliberately **not** built in Stage 1, when
+there was one client and the generality would have been speculative.
+
+---
+
+## D24 — The market maker has no access to the latent value
+
+It is constructed with a book and nothing else. Any fair-value estimate comes from the book alone,
+which is the information a real one has. Give it the latent value and it becomes an oracle.
+
+---
+
+## D25 — Fair value excludes the maker's own quotes
+
+Computed by walking the depth and subtracting own resting size at own price. Without it the maker
+reads its own mid back, the estimate freezes, and it is picked off at a stale price. A market
+maker must always be able to distinguish its own liquidity from the market's.
+
+---
+
+## D26 — Quotes round outward from an unrounded mid; the half-spread is in half-ticks
+
+Rounding the mid to a tick first biases both quotes in the same direction whenever the market
+spread is odd — which it is ~70% of the time. Half a tick of asymmetry produced a **724-lot
+position on 934 lots of volume**. The half-spread is expressed in half-ticks because the market's
+own spread is one or two ticks, so a whole-tick half-spread quotes outside it and never trades
+(92 fills in 40,000 events before this was measured).
+
+---
+
+## D27 — Inventory: skew as the control, a hard cap enforced through quote sizing
+
+Skew alone takes mean |position| from 636 to 12.9. The cap is enforced by sizing each quote
+against the remaining room, because merely suppressing the quote at the limit lets an
+already-resting quote carry the position through it (observed: 22 against a cap of 20). *Recorded
+finding:* `skew_per_lot = 0.10` is **worse** than 0.03 — mean |position| 111.9, worst 2,410. An
+over-gained control loop oscillates.
+
+---
+
+## D28 — Order id space is partitioned rather than shared
+
+Participants allocate upward from 1, the maker from 2⁶³. A shared allocator would couple the two
+components; a collision would be *silently rejected* by the book and would present as a maker that
+mysteriously stops quoting.
+
+---
+
+## D29 — Markouts are measured against the mid, not the latent value
+
+Measuring against `V` puts the entire cost of informed flow into the **spread capture** term,
+because the mid is already stale at trade time and `V` is a martingale afterwards. Observed:
+spread capture −2.72/lot and adverse selection +0.05 at `rate_informed = 4`. Adverse selection is
+the market's *correction*, and the mid is the thing that corrects — the informed trade moves the
+mid toward `V`, and that move is the loss. Both decompositions are computed; the mid-based pair is
+the headline and the latent-value pair validates it, agreeing to about a third of a tick.
+
+---
+
+## D30 — `PnlAttribution` is separate, with strictly more information than the maker
+
+The maker sees the book; the attribution sees the book, the latent value and the clock. Merging
+them would require handing the maker the latent value, at which point it could quote off it and
+every result becomes an artefact.
+
+---
+
+## D31 — One `std::deque` per horizon
+
+Append at the back, retire from the front — same access pattern and same argument as the
+price-level queue. *Rejected:* one shared list with per-horizon cursors, which cannot pop until
+every horizon has consumed an element. Copying a small struct three times is cheaper than the
+bookkeeping.
+
+---
+
+## D32 — The reference mid is sampled at the end of the previous event
+
+The trade callback fires mid-match, when the book is half-updated and holds the maker's own
+quotes. One event of staleness (~0.1 ticks) buys a reference that is genuinely pre-trade rather
+than contaminated by the trade itself. The same one-event approximation applies at the horizon
+end, which is also what real markouts do.
+
+---
+
+## D33 — Unmatured fills are dropped, not flushed
+
+Settling them at the current time would mark them at a shorter horizon than requested and bias the
+long-horizon figure toward the short one. `unsettled()` exposes the count — about 5% at the
+longest horizon, 1% at the shortest. Dropping data you cannot measure beats measuring it wrong;
+exposing the count is what makes that honest rather than hidden.
+
+---
+
 ## Open questions
 
-- **D3** — cancel strategy, pending the cancel-to-fill ratio from the Phase 2 flow generator
-- **D2** — container choice, pending Phase 5 benchmarks
+- **D2** — container choice, pending benchmarks
+- Whether `Price` and `Quantity` should become strong typedefs. Currently judged not worth the
+  boilerplate; revisit if a unit-confusion bug actually occurs
 - Whether `Price` and `Quantity` should become strong typedefs. Currently judged not worth the
   boilerplate; revisit if a unit-confusion bug actually occurs
 - Whether the trade callback should become a template parameter, pending benchmark evidence that
