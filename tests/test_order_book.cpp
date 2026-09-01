@@ -52,10 +52,11 @@ struct Tape {
     std::vector<Trade> trades;
 
     void attach(OrderBook& b) {
-        b.set_trade_callback([this](const Trade& t) { trades.push_back(t); });
+        b.add_trade_listener([this](const Trade& t) { trades.push_back(t); });
     }
     std::size_t count() const { return trades.size(); }
     const Trade& operator[](std::size_t i) const { return trades.at(i); }
+
     Quantity total_quantity() const {
         Quantity q = 0;
         for (const auto& t : trades) q += t.quantity;

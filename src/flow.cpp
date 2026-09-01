@@ -9,7 +9,7 @@ FlowGenerator::FlowGenerator(OrderBook& book, ValueProcess& value, Rng& rng,
                              const FlowParams& params)
     : book_(&book), value_(&value), rng_(&rng), params_(params),
       last_price_(params.initial_price) {
-    book_->set_trade_callback([this](const Trade& t) { on_trade(t); });
+    book_->add_trade_listener([this](const Trade& t) { on_trade(t); });
 }
 
 void FlowGenerator::run(std::size_t n) {
