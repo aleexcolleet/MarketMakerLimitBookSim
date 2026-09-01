@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  # Three toolchains, because the project's central claim is that a run reproduces
+  # exactly and the standard library is where that breaks. libstdc++ and libc++
+  # differ in ways that have already bitten this repository: a missing trailing
+  # newline that AppleClang accepted and GCC rejected under -Werror, and an
+  # integer overflow that raises SIGFPE on x86 but is replaced with a trap
+  # instruction on aarch64.
+  build-and-test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Do not cancel the other legs when one fails — a cross-compiler difference
+      # is exactly the thing worth seeing in full.
+      fail-fast: false
+      matrix:
+        include:
+          - { name: "Linux · GCC",         os: ubuntu-latest, cc: gcc,   cxx: g++ }
+          - { name: "Linux · Clang",       os: ubuntu-latest, cc: clang, cxx: clang++ }
+          - { name: "macOS · AppleClang",  os: macos-latest,  cc: clang, cxx: clang++ }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compiler version
+        env:
+          CXX: ${{ matrix.cxx }}
+        run: $CXX --version
+
+      - name: Configure
+        env:
+          CC:  ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Test
+        working-directory: build
+        run: ctest --output-on-failure
+
+  sanitizers:
+    name: Sanitizers · ASan + UBSan
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # RelWithDebInfo rather than Debug: the statistical tests do a few million
+      # Monte Carlo draws, and at -O0 under sanitizers that runs for minutes.
+      # -O2 -g is also the usual recommendation for ASan — the optimiser keeps
+      # the instrumentation and the debug info keeps the stack traces readable.
+      - name: Configure
+        env:
+          CC:  gcc
+          CXX: g++
+        run: cmake -B build-asan -DMMS_SANITIZE=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
+
+      - name: Build
+        run: cmake --build build-asan -j
+
+      - name: Test
+        working-directory: build-asan
+        env:
+          ASAN_OPTIONS:  detect_leaks=1
+          # Without halt_on_error, UBSan prints a diagnostic and carries on, so
+          # the job would go green with undefined behaviour in it.
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: ctest --output-on-failure

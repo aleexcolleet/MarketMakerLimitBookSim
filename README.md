@@ -1,5 +1,7 @@
 # Market Maker Limit Book Simulator
 
+[![CI](https://github.com/aleexcolleet/MarketMakerLimitBookSim/actions/workflows/ci.yml/badge.svg)](https://github.com/aleexcolleet/MarketMakerLimitBookSim/actions/workflows/ci.yml)
+
 A price-time priority limit order book and a synthetic market in C++17, built to measure where a
 market maker's P&L actually comes from — and where it leaks.
 
@@ -56,6 +58,11 @@ cmake --build build-asan -j && ctest --test-dir build-asan
 
 **5,369 assertions** across five suites, clean under `-Werror -Wall -Wextra -Wpedantic -Wshadow
 -Wconversion` and under AddressSanitizer + UndefinedBehaviorSanitizer.
+
+CI runs the suite on every push across **three toolchains** — GCC and Clang on Linux, AppleClang on
+macOS — plus a sanitizer job. Three rather than one because the project's central claim is that a
+run reproduces exactly, and the standard library is where that breaks: libstdc++ and libc++ are
+free to differ, which is why the random distributions here are hand-written (D12).
 
 Reproducing the chart:
 
