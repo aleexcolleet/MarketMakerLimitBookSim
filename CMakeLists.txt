@@ -64,3 +64,12 @@ add_test(NAME market_maker COMMAND mms_maker_tests)
 add_executable(mms_attribution_tests tests/test_attribution.cpp)
 target_link_libraries(mms_attribution_tests PRIVATE mms)
 add_test(NAME attribution COMMAND mms_attribution_tests)
+
+# ---------------------------------------------------------------------------
+#  Tools
+# ---------------------------------------------------------------------------
+# Not registered with add_test: this prints numbers rather than asserting them.
+#   ./build/mms_sweep > docs/attribution.csv
+#   python3 tools/plot_attribution.py docs/attribution.csv docs/attribution.png
+add_executable(mms_sweep tools/sweep.cpp)
+target_link_libraries(mms_sweep PRIVATE mms)
